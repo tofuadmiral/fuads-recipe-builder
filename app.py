@@ -8,8 +8,8 @@ from openinference.instrumentation.langchain import LangChainInstrumentor
 
 # -- ENVIRONMENT SETUP ------------------------------------------------
 
-# Set your OpenAI key safely
-os.environ["OPENAI_API_KEY"] = st.secrets.get("OPENAI_API_KEY", "sk-...your-key-here...")
+# Set your OpenAI key from secrets
+os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
 # Register Phoenix tracing
 register(project_name="recipe-builder", auto_instrument=True)
