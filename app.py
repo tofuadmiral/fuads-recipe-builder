@@ -20,11 +20,13 @@ os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
 # --- Tracing Setup ---
+from phoenix.otel import register
 
 tracer_provider = register(
     project_name="recipe-builder",
     auto_instrument=True,
-    set_global_tracer_provider=True
+    set_global_tracer_provider=True,
+    batch=True
 )
 
 LangChainInstrumentor().instrument()
