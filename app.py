@@ -9,11 +9,8 @@ from langchain.prompts import (
     HumanMessagePromptTemplate,
 )
 from langchain_openai import ChatOpenAI
-from phoenix.trace.exporter import get_langchain_exporter
 from phoenix.otel import register
 from openinference.instrumentation.langchain import LangChainInstrumentor
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 # --- Phoenix Setup ---
 os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={st.secrets['PHOENIX_API_KEY']}"
@@ -23,12 +20,8 @@ os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
 # --- Tracing Setup ---
-exporter = get_langchain_exporter()
-tracer_provider = TracerProvider()
-tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
 
-register(
-    tracer_provider=tracer_provider,
+tracer_provider = register(
     project_name="recipe-builder",
     auto_instrument=True,
     set_global_tracer_provider=True
