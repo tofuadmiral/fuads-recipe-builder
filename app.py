@@ -3,41 +3,45 @@ import os
 import streamlit as st
 import time
 
-from langchain.prompts import PromptTemplate
-from langchain_openai import ChatOpenAI  # ✅ updated import
+from langchain.prompts import (
+    ChatPromptTemplate,
+    SystemMessagePromptTemplate,
+    HumanMessagePromptTemplate,
+)
+from langchain_openai import ChatOpenAI
 from phoenix.otel import register
 from openinference.instrumentation.langchain import LangChainInstrumentor
 
-# Phoenix Setup
-os.environ["PHONEIX_CLIENT_HEADERS"] = f"api_key={st.secrets['PHOENIX_API_KEY']}"
+# --- Phoenix Setup ---
+os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={st.secrets['PHOENIX_API_KEY']}"
 os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
 
 # --- Secrets / API Key ---
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
-# --- LLM Setup ---
-llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.7)
-
-# Configure the Phoenix tracer
+# --- Tracing Setup ---
 tracer_provider = register(
     project_name="recipe-builder",
     auto_instrument=True,
     set_global_tracer_provider=True
 )
+
 LangChainInstrumentor().instrument()
 
+# --- LLM Setup ---
+llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.7)
 
-prompt = PromptTemplate(
-    input_variables=["ingredients", "location", "budget"],
-    template="""
-You are a helpful, budget-conscious home cook assistant.
-Given the ingredients: {ingredients}, the user's location: {location}, and a budget of ${budget},
-suggest a creative dinner recipe using the listed items.
-If additional groceries are needed, list them with an estimated cost based on the city's average prices.
-"""
-)
+prompt = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template("You are a helpful, budget-conscious home cook assistant."),
+    HumanMessagePromptTemplate.from_template(
+        "Given the ingredients: {ingredients}, location: {location}, and budget: ${budget}, "
+        "suggest a dinner recipe using the ingredients. "
+        "If additional groceries are needed, list them with estimated cost based on city averages. "
+        "Also, suggest where to buy these ingredients locally, and imagine what the completed dish might look like."
+    )
+])
 
-# ✅ Runnable syntax replaces deprecated LLMChain
+# ✅ Runnable chain
 recipe_chain = prompt | llm
 
 # --- UI Setup ---
@@ -56,7 +60,6 @@ budget = st.slider("Budget (USD)", min_value=5, max_value=100, step=1, value=20)
 # --- Generate Recipe ---
 if st.button("Suggest a Recipe"):
     with st.spinner("Cooking up something delicious..."):
-        # time our response
         start_time = time.time()
 
         result = recipe_chain.invoke({
@@ -66,12 +69,16 @@ if st.button("Suggest a Recipe"):
         })
 
         latency = round(time.time() - start_time, 2)
+
+        # Output section
         st.markdown(f"🧠 **Model used:** `{llm.model_name}`")
         st.markdown(f"⏱️ **Response time:** `{latency} seconds`")
         st.success("Here’s your dinner idea:")
+
         try:
             st.markdown(result.content)
         except AttributeError:
-            st.markdown(result)  # fallback if result is plain text
-        st.markdown(f"🧾 **JSON Result:**")
+            st.markdown(result)
+
+        st.markdown(f"📎 **Raw JSON Output:**")
         st.write(result)
