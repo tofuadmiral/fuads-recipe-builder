@@ -60,28 +60,37 @@ location = st.selectbox("Your City + Country:", [
 ])
 budget = st.slider("Budget (USD)", min_value=5, max_value=100, step=1, value=20)
 
+
 # --- Generate Recipe ---
-if st.button("Suggest a Recipe"):
-    with st.spinner("Cooking up something delicious..."):
-        start_time = time.time()
+@st.cache_resource
+def call_llm(ingredients, location, budget):
+    result = recipe_chain.invoke({
+        "ingredients": ingredients,
+        "location": location,
+        "budget": budget
+    })
+    return result
 
-        result = recipe_chain.invoke({
-            "ingredients": ingredients,
-            "location": location,
-            "budget": budget
-        })
+def generate_recipe():
+    if st.button("Suggest a Recipe"):
+        with st.spinner("Cooking up something delicious..."):
+            start_time = time.time()
 
-        latency = round(time.time() - start_time, 2)
+            result = call_llm(ingredients, location, budget)
 
-        # Output section
-        st.markdown(f"🧠 **Model used:** `{llm.model_name}`")
-        st.markdown(f"⏱️ **Response time:** `{latency} seconds`")
-        st.success("Here’s your dinner idea:")
+            latency = round(time.time() - start_time, 2)
 
-        try:
-            st.markdown(result.content)
-        except AttributeError:
-            st.markdown(result)
+            # Output section
+            st.markdown(f"🧠 **Model used:** `{llm.model_name}`")
+            st.markdown(f"⏱️ **Response time:** `{latency} seconds`")
+            st.success("Here’s your dinner idea:")
 
-        st.markdown(f"📎 **Raw JSON Output:**")
-        st.write(result)
+            try:
+                st.markdown(result.content)
+            except AttributeError:
+                st.markdown(result)
+
+            st.markdown(f"📎 **Raw JSON Output:**")
+            st.write(result)
+
+generate_recipe()
