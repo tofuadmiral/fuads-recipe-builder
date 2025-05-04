@@ -1,28 +1,31 @@
 # --- Imports ---
 import os
 import streamlit as st
-from langchain_community.chat_models import ChatOpenAI
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 import time
 
-# 🔁 Phoenix Tracing
+from langchain.prompts import PromptTemplate
+from langchain_openai import ChatOpenAI  # ✅ updated import
 from phoenix.otel import register
 from openinference.instrumentation.langchain import LangChainInstrumentor
 
-# --- Tracing Setup ---
-register(
-    project_name="recipe-builder",
-    auto_instrument=False,
-    set_global_tracer_provider=False,
-)
-LangChainInstrumentor().instrument()
+# Phoenix Setup
+os.environ["PHONEIX_CLIENT_HEADERS"] = f"api_key={st.secrets['PHOENIX_API_KEY']}"
+os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
 
 # --- Secrets / API Key ---
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
 # --- LLM Setup ---
 llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.7)
+
+# Configure the Phoenix tracer
+tracer_provider = register(
+    project_name="recipe-builder",
+    auto_instrument=True,
+    set_global_tracer_provider=True
+)
+LangChainInstrumentor().instrument()
+
 
 prompt = PromptTemplate(
     input_variables=["ingredients", "location", "budget"],
@@ -34,7 +37,8 @@ If additional groceries are needed, list them with an estimated cost based on th
 """
 )
 
-recipe_chain = LLMChain(llm=llm, prompt=prompt)
+# ✅ Runnable syntax replaces deprecated LLMChain
+recipe_chain = prompt | llm
 
 # --- UI Setup ---
 st.set_page_config(page_title="Fuad's Recipe Builder", page_icon="🧑🏽‍🍳")
@@ -62,13 +66,12 @@ if st.button("Suggest a Recipe"):
         })
 
         latency = round(time.time() - start_time, 2)
-        st.success("Here’s your dinner idea:")
         st.markdown(f"🧠 **Model used:** `{llm.model_name}`")
         st.markdown(f"⏱️ **Response time:** `{latency} seconds`")
-        st.markdown(f"**User Facing Result")
-        if isinstance(result, dict) and "text" in result:
-            st.markdown(result["text"])
-        else:
-            st.markdown(result)  # fallback if it's plain markdown
-        st.markdown(f"⏱️ **JSON Result:**")
+        st.success("Here’s your dinner idea:")
+        try:
+            st.markdown(result.content)
+        except AttributeError:
+            st.markdown(result)  # fallback if result is plain text
+        st.markdown(f"🧾 **JSON Result:**")
         st.write(result)
