@@ -1,71 +1,74 @@
+# --- Imports ---
 import os
-import time
 import streamlit as st
 from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
+import time
+
+# 🔁 Phoenix Tracing
 from phoenix.otel import register
 from openinference.instrumentation.langchain import LangChainInstrumentor
 
-# -- ENVIRONMENT SETUP ------------------------------------------------
-
-# Set your OpenAI key from secrets
-os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
-
-# Register Phoenix tracing
-register(project_name="recipe-builder", auto_instrument=True)
+# --- Tracing Setup ---
+register(
+    project_name="recipe-builder",
+    auto_instrument=False,
+    set_global_tracer_provider=False,
+)
 LangChainInstrumentor().instrument()
 
-# -- Select Dropdowns Setup --------------------------------------------
-cities = [
-    "New York, New York, United States",
-    "Toronto, Ontario, Canada",
-    "London, United Kingdom",
-    "San Francisco, California, United States",
-    "Montreal, Quebec, Canada",
-    "Paris, France",
-    "Berlin, Germany",
-    "Tokyo, Japan",
-    "Sydney, Australia", 
-    "Denver, Colarado, United States"
-]
+# --- Secrets / API Key ---
+os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
-# -- LANGCHAIN SETUP ---------------------------------------------------
+# --- LLM Setup ---
+llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.7)
 
-# Initialize LLM
-llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.5, request_timeout=20, max_tokens = 300)
-
-# Prompt to guide recipe generation
 prompt = PromptTemplate(
     input_variables=["ingredients", "location", "budget"],
     template="""
 You are a helpful, budget-conscious home cook assistant.
-Given the ingredients: {ingredients}, the users location {location}, and a budget of {budget} dollars,
-suggest one creative dinner recipe I can make tonight.
-Use as many listed ingredients as possible.
-If additional groceries are needed, list them with estimated cost. 
-The cost should be based on average grocery costs for the user's city. Scrape the internet if you need to understand how much groceries cost in that area. 
+Given the ingredients: {ingredients}, the user's location: {location}, and a budget of ${budget},
+suggest a creative dinner recipe using the listed items.
+If additional groceries are needed, list them with an estimated cost based on the city's average prices.
 """
 )
 
-# Chain for recipe generation
 recipe_chain = LLMChain(llm=llm, prompt=prompt)
 
-# -- STREAMLIT UI -------------------------------------------------------
-
+# --- UI Setup ---
 st.set_page_config(page_title="Fuad's Recipe Builder", page_icon="🧑🏽‍🍳")
 st.title("🧑🏽‍🍳 Fuad's Recipe Builder")
+st.markdown("Enter your ingredients, location, and budget to get a smart dinner suggestion!")
 
-st.markdown("Enter your existing ingredients, your target budget, and location. Get a recipe to cook!")
 ingredients = st.text_input("Ingredients you have (comma-separated):", placeholder="e.g. eggs, spinach, rice")
-location = st.selectbox("Your City + Country:", cities)
-budget = st.slider("What’s your budget (in USD)?", min_value=5, max_value=100, step=1, value=20)
+location = st.selectbox("Your City + Country:", [
+    "New York, United States", "Toronto, Canada", "London, United Kingdom",
+    "San Francisco, United States", "Montreal, Canada", "Paris, France",
+    "Berlin, Germany", "Tokyo, Japan", "Sydney, Australia", "Denver, United States"
+])
+budget = st.slider("Budget (USD)", min_value=5, max_value=100, step=1, value=20)
 
+# --- Generate Recipe ---
 if st.button("Suggest a Recipe"):
-    start = time.time()
     with st.spinner("Cooking up something delicious..."):
-        result = recipe_chain.run({"ingredients": ingredients, "location": location, "budget": budget})
+        # time our response
+        start_time = time.time()
+
+        result = recipe_chain.invoke({
+            "ingredients": ingredients,
+            "location": location,
+            "budget": budget
+        })
+
+        latency = round(time.time() - start_time, 2)
         st.success("Here’s your dinner idea:")
-        end = time.time()
-        st.info(f"⏱️ Response time: {round(end - start, 2)} seconds")
+        st.markdown(f"🧠 **Model used:** `{llm.model_name}`")
+        st.markdown(f"⏱️ **Response time:** `{latency} seconds`")
+        st.markdown(f"**User Facing Result")
+        if isinstance(result, dict) and "text" in result:
+            st.markdown(result["text"])
+        else:
+            st.markdown(result)  # fallback if it's plain markdown
+        st.markdown(f"⏱️ **JSON Result:**")
         st.write(result)
