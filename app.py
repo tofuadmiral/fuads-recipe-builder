@@ -1,4 +1,5 @@
 import os
+import time
 import streamlit as st
 from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
@@ -32,7 +33,7 @@ cities = [
 # -- LANGCHAIN SETUP ---------------------------------------------------
 
 # Initialize LLM
-llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
+llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.5, request_timeout=20, max_tokens = 300)
 
 # Prompt to guide recipe generation
 prompt = PromptTemplate(
@@ -61,7 +62,10 @@ location = st.selectbox("Your City + Country:", cities)
 budget = st.slider("What’s your budget (in USD)?", min_value=5, max_value=100, step=1, value=20)
 
 if st.button("Suggest a Recipe"):
+    start = time.time()
     with st.spinner("Cooking up something delicious..."):
         result = recipe_chain.run({"ingredients": ingredients, "location": location, "budget": budget})
         st.success("Here’s your dinner idea:")
+        end = time.time()
+        st.info(f"⏱️ Response time: {round(end - start, 2)} seconds")
         st.write(result)
