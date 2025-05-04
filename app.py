@@ -53,7 +53,7 @@ ingredients = st.text_input("Ingredients you have (comma-separated):", placehold
 location = st.selectbox("Your City + Country:", [
     "New York, United States", "Toronto, Canada", "London, United Kingdom",
     "San Francisco, United States", "Montreal, Canada", "Paris, France",
-    "Berlin, Germany", "Tokyo, Japan", "Sydney, Australia", "Denver, United States"
+    "Berlin, Germany", "Tokyo, Japan", "Sydney, Australia", "Denver, United States", "Rio de Janeiro, Brazil"
 ])
 budget = st.slider("Budget (USD)", min_value=5, max_value=100, step=1, value=20)
 
