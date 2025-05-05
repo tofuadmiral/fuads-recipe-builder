@@ -21,23 +21,22 @@ judge_model = OpenAIModel(model="gpt-4o")
 # Initialze Phoneix Client 
 client = px.Client()
 
-# Define a query to select input and output from LLM spans
+# --- Get Evaluation Targets ---
 query = SpanQuery().where("span_kind == 'LLM'").select(
     input="input.value",
     output="output.value"
 )
 
-# Execute the query to retrieve spans
-df = client.query_spans(query)
+spans_df = client.query_spans(query)
 
-# --- Define criteria ---
+# --- Define criteria for evaluation ---
 helpfulness_eval = LLMEvaluator(name="Helpfulness", model=judge_model)
 hallucination_eval = HallucinationEvaluator(name="Hallucination", model=judge_model)
 relevance_eval = RelevanceEvaluator(name="Relevance", model=judge_model)
 
 # --- Run evals  ---
 helpfulness_eval_df, hallucination_eval_df, relevance_eval_df = run_evals(
-    dataframe=df, evaluators=[helpfulness_eval, hallucination_eval, relevance_eval], provide_explanation=True)
+    dataframe=spans_df, evaluators=[helpfulness_eval, hallucination_eval, relevance_eval], provide_explanation=True)
 
 # --- Log evals to Phoenix ---
 
