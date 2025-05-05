@@ -12,8 +12,10 @@ from phoenix.trace.dsl import SpanQuery
 
 # --- Load secrets ---
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
-os.environ["PHOENIX_API_KEY"] = st.secrets["PHOENIX_API_KEY"]
+os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={st.secrets['PHOENIX_API_KEY']}"
 os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
+os.environ["PHOENIX_PROJECT_NAME"] = "recipe-builder"
+
 
 # --- Evaluation model ---
 judge_model = OpenAIModel(model="gpt-4o")
@@ -30,21 +32,16 @@ query = SpanQuery().where("span_kind == 'LLM'").select(
 spans_df = client.query_spans(query)
 
 # --- Define criteria for evaluation ---
-helpfulness_eval = LLMEvaluator(name="Helpfulness", model=judge_model)
-hallucination_eval = HallucinationEvaluator(name="Hallucination", model=judge_model)
-relevance_eval = RelevanceEvaluator(name="Relevance", model=judge_model)
+hallucination_eval = HallucinationEvaluator(model=judge_model)
+relevance_eval = RelevanceEvaluator(model=judge_model)
 
 # --- Run evals  ---
-helpfulness_eval_df, hallucination_eval_df, relevance_eval_df = run_evals(
-    dataframe=spans_df, evaluators=[helpfulness_eval, hallucination_eval, relevance_eval], provide_explanation=True)
+hallucination_eval_df, relevance_eval_df = run_evals(
+    dataframe=spans_df, evaluators=[hallucination_eval, relevance_eval], provide_explanation=True)
 
 # --- Log evals to Phoenix ---
 
 client.log_evaluations(
-    SpanEvaluations(
-        dataframe=helpfulness_eval_df,
-        eval_name="Helpfulness"
-    ),
     SpanEvaluations(
         dataframe=hallucination_eval_df,
         eval_name="Hallucination"
