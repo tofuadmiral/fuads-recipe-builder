@@ -8,15 +8,27 @@ from phoenix.evals import run_evals
 from phoenix.evals.models import OpenAIModel
 from phoenix.evals.evaluators import LLMEvaluator, HallucinationEvaluator, RelevanceEvaluator
 from phoenix.trace import SpanEvaluations
+from phoenix.trace.dsl import SpanQuery
 
 # --- Load secrets ---
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 os.environ["PHOENIX_API_KEY"] = st.secrets["PHOENIX_API_KEY"]
 os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
 
-
 # --- Evaluation model ---
 judge_model = OpenAIModel(model="gpt-4o")
+
+# Initialze Phoneix Client 
+client = px.Client()
+
+# Define a query to select input and output from LLM spans
+query = SpanQuery().where("span_kind == 'LLM'").select(
+    input="input.value",
+    output="output.value"
+)
+
+# Execute the query to retrieve spans
+df = client.query_spans(query)
 
 # --- Define criteria ---
 helpfulness_eval = LLMEvaluator(name="Helpfulness", model=judge_model)
@@ -27,9 +39,7 @@ relevance_eval = RelevanceEvaluator(name="Relevance", model=judge_model)
 helpfulness_eval_df, hallucination_eval_df, relevance_eval_df = run_evals(
     dataframe=df, evaluators=[helpfulness_eval, hallucination_eval, relevance_eval], provide_explanation=True)
 
-# --- Log evals to Phoenix ---0
-
-client = px.Client()
+# --- Log evals to Phoenix ---
 
 client.log_evaluations(
     SpanEvaluations(
@@ -46,4 +56,4 @@ client.log_evaluations(
     ),
 )
 
-print("✅ Evaluation submitted to Phoenix.")
+print("Evaluation submitted to Phoenix.")
