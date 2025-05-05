@@ -17,10 +17,8 @@ os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
 os.environ["PHOENIX_PROJECT_NAME"] = "recipe-builder"
 
 
-# --- Evaluation model ---
+# --- Initialize client and model ---
 judge_model = OpenAIModel(model="gpt-4o")
-
-# Initialze Phoneix Client 
 client = px.Client()
 
 # --- Get Evaluation Targets ---
