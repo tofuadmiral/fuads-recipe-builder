@@ -6,7 +6,7 @@ from pandas import DataFrame as df
 
 from phoenix.evals import run_evals
 from phoenix.evals.models import OpenAIModel
-from phoenix.evals.evaluators import LLMEvaluator, HallucinationEvaluator, RelevanceEvaluator
+from phoenix.evals.evaluators import LLMEvaluator, HallucinationEvaluator, RelevanceEvaluator, ToxicityEvaluator
 from phoenix.trace import SpanEvaluations
 from phoenix.trace.dsl import SpanQuery
 
@@ -30,19 +30,20 @@ query = SpanQuery().where("span_kind == 'LLM'").select(
 spans_df = client.query_spans(query)
 
 # --- Define criteria for evaluation ---
-hallucination_eval = HallucinationEvaluator(model=judge_model)
+toxicity_eval = ToxicityEvaluator(model=judge_model)
 relevance_eval = RelevanceEvaluator(model=judge_model)
 
 # --- Run evals  ---
-hallucination_eval_df, relevance_eval_df = run_evals(
-    dataframe=spans_df, evaluators=[hallucination_eval, relevance_eval], provide_explanation=True)
+toxicity_eval_df, relevance_eval_df = run_evals(
+    dataframe=spans_df, evaluators=[toxicity_eval, relevance_eval], provide_explanation=True)
 
 # --- Log evals to Phoenix ---
 
 client.log_evaluations(
     SpanEvaluations(
-        dataframe=hallucination_eval_df,
-        eval_name="Hallucination"
+        dataframe=toxicity_eval_df,
+
+        eval_name="Toxicity"
     ),
     SpanEvaluations(
         dataframe=relevance_eval_df,
