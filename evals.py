@@ -6,7 +6,9 @@ from pandas import DataFrame as df
 
 from phoenix.evals import run_evals
 from phoenix.evals.models import OpenAIModel
-from phoenix.evals.evaluators import LLMEvaluator, HallucinationEvaluator, RelevanceEvaluator, ToxicityEvaluator
+from phoenix.evals.evaluators import LLMEvaluator
+from phoenix.evals.evaluators import ToxicityEvaluator
+from phoenix.evals.templates import ClassificationTemplate
 from phoenix.trace import SpanEvaluations
 from phoenix.trace.dsl import SpanQuery
 
@@ -18,7 +20,7 @@ os.environ["PHOENIX_PROJECT_NAME"] = "recipe-builder"
 
 
 # --- Initialize client and model ---
-judge_model = OpenAIModel(model="gpt-4o")
+judge_model = OpenAIModel(model="gpt-4.1")
 client = px.Client()
 
 # --- Get Evaluation Targets ---
@@ -29,13 +31,52 @@ query = SpanQuery().where("span_kind == 'LLM'").select(
 
 spans_df = client.query_spans(query)
 
-# --- Define criteria for evaluation ---
+# --- Define custom evaluators without the need of references ----
+factuality_template = ClassificationTemplate(
+    rails=["1", "2", "3", "4", "5"],
+    template=(
+        "Rate the factual accuracy of the answer below using your general world knowledge. "
+        "Give a score from 1 to 5, where:\n"
+        "1 = Completely hallucinated (made-up)\n"
+        "3 = Some factual content, some hallucinations\n"
+        "5 = Fully accurate\n\n"
+        "Question: {input}\n"
+        "Answer: {output}\n\n"
+        "Your rating (1–5):"
+    )
+)
+
+relevance_template = ClassificationTemplate(
+    rails=["1", "2", "3", "4", "5"],
+    template=(
+        "Rate how relevant the answer is to the question on a scale from 1 to 5, where:\n"
+        "1 = Not relevant at all\n"
+        "3 = Somewhat related but missing the point\n"
+        "5 = Highly relevant and directly answers the question\n\n"
+        "Question: {input}\n"
+        "Answer: {output}\n\n"
+        "Your rating (1–5):"
+    )
+)
+
+
+# --- Instantiate evaluators ---
 toxicity_eval = ToxicityEvaluator(model=judge_model)
-relevance_eval = RelevanceEvaluator(model=judge_model)
+
+factuality_eval = LLMEvaluator(
+    model=judge_model,
+    template=factuality_template
+)
+
+relevance_eval = LLMEvaluator(
+    model=judge_model,
+    template=relevance_template
+)
+
 
 # --- Run evals  ---
-toxicity_eval_df, relevance_eval_df = run_evals(
-    dataframe=spans_df, evaluators=[toxicity_eval, relevance_eval], provide_explanation=True)
+toxicity_eval_df, factuality_eval_df, relevance_eval_df = run_evals(
+    dataframe=spans_df, evaluators=[toxicity_eval, factuality_eval, relevance_eval], provide_explanation=True)
 
 # --- Log evals to Phoenix ---
 
@@ -46,9 +87,13 @@ client.log_evaluations(
         eval_name="Toxicity"
     ),
     SpanEvaluations(
-        dataframe=relevance_eval_df,
-        eval_name="Relevance"
+        dataframe=factuality_eval_df,
+        eval_name="Factuality 1-5"
     ),
+        SpanEvaluations(
+        dataframe=relevance_eval_df,
+        eval_name="Relevance 1-5"
+    )
 )
 
 print("Evaluation submitted to Phoenix.")
