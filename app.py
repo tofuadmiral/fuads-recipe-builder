@@ -1,7 +1,9 @@
 # --- Imports ---
 import os
+import re
 import streamlit as st
 import time
+import openai
 
 from langchain.prompts import (
     ChatPromptTemplate,
@@ -18,6 +20,7 @@ os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
 
 # --- Secrets / API Key ---
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # --- Tracing Setup ---
 from phoenix.otel import register
@@ -41,6 +44,7 @@ prompt = ChatPromptTemplate.from_messages([
         "suggest a dinner recipe using the ingredients. "
         "If additional groceries are needed, list them with estimated cost based on city averages. "
         "Also, suggest where to buy these ingredients locally, and imagine what the completed dish might look like."
+        "Also, return a vivid one-sentence visual description of the completed dish named Visual Description:"
     )
 ])
 
@@ -71,6 +75,18 @@ def call_llm(ingredients, location, budget):
     })
     return result
 
+# Generate image
+def generate_recipe_image(prompt: str) -> str:
+    response = openai_client.images.generate(
+        model="dall-e-3",  # or "dall-e-2"
+        prompt=prompt,
+        size="1024x1024",
+        quality="standard",
+        n=1
+    )
+    return response.data[0].url
+
+
 def generate_recipe():
     if st.button("Suggest a Recipe"):
         with st.spinner("Cooking up something delicious..."):
@@ -92,5 +108,14 @@ def generate_recipe():
 
             st.markdown(f"📎 **Raw JSON Output:**")
             st.write(result)
+
+            # Show Image
+
+            visual_description = f"A realistic photo of a dish made with {ingredients}"
+
+            with st.spinner("Generating an image of your dish..."):
+                image_url = generate_recipe_image(visual_description)
+                st.image(image_url, caption="🍽️ Your Dish (AI-generated)")
+
 
 generate_recipe()
