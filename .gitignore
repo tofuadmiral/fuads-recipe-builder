@@ -1,5 +1,6 @@
 # Ignore Python virtual environments
 .venv/
+venv/
 
 # Python cache files
 __pycache__/
@@ -11,3 +12,4 @@ __pycache__/
 .env.*
 
 .streamlit/secrets.toml
+venv/

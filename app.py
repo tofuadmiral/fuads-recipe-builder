@@ -35,7 +35,7 @@ tracer_provider = register(
 LangChainInstrumentor().instrument()
 
 # --- LLM Setup ---
-llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.7)
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
 
 prompt = ChatPromptTemplate.from_messages([
     SystemMessagePromptTemplate.from_template("You are a helpful, budget-conscious home cook assistant."),
@@ -99,7 +99,7 @@ def generate_recipe():
             # Output section
             st.markdown(f"🧠 **Model used:** `{llm.model_name}`")
             st.markdown(f"⏱️ **Response time:** `{latency} seconds`")
-            st.success("Here’s your dinner idea:")
+            st.success("Here's your dinner idea:")
 
             try:
                 st.markdown(result.content)
