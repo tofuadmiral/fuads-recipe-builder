@@ -147,7 +147,7 @@ def get_anthropic_span_attributes(model: str, prompt: str):
         "http.request.header.x-api-version": "2023-06-01",
         "http.request.header.anthropic-version": "2023-06-01",
         
-        # Response attributes (will be updated after response)
+        # Response attributes to be updated after response
         "http.response.status_code": None,
         "http.response.header.content_type": None,
         
