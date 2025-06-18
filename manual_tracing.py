@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.trace import Status, StatusCode
+from opentelemetry.trace import Status, StatusCode, SpanKind
 from arize.otel import register
 from openai import OpenAI
 from anthropic import Anthropic
@@ -15,6 +15,8 @@ from openinference.semconv.trace import (
 )
 from openai.types.chat import ChatCompletionToolParam
 import json
+import uuid
+from openinference.instrumentation import using_attributes
 
 # Load environment variables from .env file
 load_dotenv()
@@ -265,65 +267,124 @@ def call_openai(prompt: str, model: str = "gpt-3.5-turbo") -> str:
         # Set OpenTelemetry status
         span.set_status(Status(StatusCode.OK, "Request completed successfully"))
 
-        if message.tool_calls:
-            tool_call = message.tool_calls[0]
-            tool_call_id = tool_call.id
-            tool_name = tool_call.function.name
-            tool_args = tool_call.function.arguments
+        # Create a decision point span to show branching
+        with tracer.start_as_current_span("llm_decision_point", kind=trace.SpanKind.INTERNAL) as decision_span:
+            decision_span.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, "chain")
+            decision_span.set_attribute("decision.type", "tool_call_decision")
+            decision_span.set_attribute("decision.description", "LLM decides whether to use tools or respond directly")
+            
+            if message.tool_calls:
+                tool_call = message.tool_calls[0]
+                tool_call_id = tool_call.id
+                tool_name = tool_call.function.name
+                tool_args = tool_call.function.arguments
 
-            # Trace the tool call in a child span
-            if tool_name == "get_weather":
-                with tracer.start_as_current_span("tool_call.get_weather") as tool_span:
-                    # Get tool span attributes
-                    tool_attributes = get_tool_span_attributes(tool_name, tool_args, tool_call_id)
-                    
-                    # Set all tool attributes in batch
-                    set_span_attributes_batch(tool_span, tool_attributes)
-                    
-                    # Simulate the tool's response by making a secondary OpenAI call
-                    city = json.loads(tool_args).get('city', 'London')
-                    weather_prompt = f"What is the weather in {city}?"
-                    
-                    # This secondary OpenAI call will be auto-instrumented and show up as a separate span
-                    weather_response = openai_client.chat.completions.create(
-                        model=model,
-                        messages=[{"role": "user", "content": weather_prompt}]
-                    )
-                    tool_response = weather_response.choices[0].message.content or ""
-                    
-                    tool_span.set_attribute("tool.response", tool_response)
-                    # Add output value for tool visibility
-                    tool_span.set_attribute(SpanAttributes.OUTPUT_VALUE, tool_response)
-                    tool_span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "text/plain")
-                    # Update tool status
-                    tool_span.set_attribute("span.status", "success")
-                    tool_span.set_attribute("span.status_code", 200)
-                    tool_span.set_attribute("span.status_message", "Tool executed successfully")
-                    # Set OpenTelemetry status
-                    tool_span.set_status(Status(StatusCode.OK, "Tool executed successfully"))
+                # Mark decision as tool call path
+                decision_span.set_attribute("decision.result", "use_tool")
+                decision_span.set_attribute("decision.tool_name", tool_name)
+
+                # Trace the tool call in a child span
+                if tool_name == "get_weather":
+                    # Create a chain span for the tool execution sequence
+                    with tracer.start_as_current_span("tool_chain.get_weather", kind=trace.SpanKind.INTERNAL) as chain_span:
+                        # Set chain span attributes
+                        chain_span.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, "chain")
+                        chain_span.set_attribute("chain.name", "weather_tool_chain")
+                        chain_span.set_attribute("chain.description", "Chain for weather tool execution")
+                        
+                        # Get tool span attributes
+                        tool_attributes = get_tool_span_attributes(tool_name, tool_args, tool_call_id)
+                        
+                        # Create the tool execution as part of the chain
+                        with tracer.start_as_current_span("tool_execution.get_weather", kind=trace.SpanKind.INTERNAL) as tool_span:
+                            # Set all tool attributes in batch
+                            set_span_attributes_batch(tool_span, tool_attributes)
+                            
+                            # Simulate the tool's response by making a secondary OpenAI call
+                            city = json.loads(tool_args).get('city', 'London')
+                            weather_prompt = f"What is the weather in {city}?"
+                            
+                            # This secondary OpenAI call will be auto-instrumented and show up as a separate span
+                            weather_response = openai_client.chat.completions.create(
+                                model=model,
+                                messages=[{"role": "user", "content": weather_prompt}]
+                            )
+                            tool_response = weather_response.choices[0].message.content or ""
+                            
+                            tool_span.set_attribute("tool.response", tool_response)
+                            # Add output value for tool visibility
+                            tool_span.set_attribute(SpanAttributes.OUTPUT_VALUE, tool_response)
+                            tool_span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "text/plain")
+                            # Update tool status
+                            tool_span.set_attribute("span.status", "success")
+                            tool_span.set_attribute("span.status_code", 200)
+                            tool_span.set_attribute("span.status_message", "Tool executed successfully")
+                            # Set OpenTelemetry status
+                            tool_span.set_status(Status(StatusCode.OK, "Tool executed successfully"))
+                            
+                            # Add the tool response to the conversation
+                            messages = [
+                                {"role": "user", "content": prompt},
+                                {"role": "assistant", "content": None, "tool_calls": [tool_call]},
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "name": tool_name,
+                                    "content": tool_response
+                                }
+                            ]
+
+                            # Make the final call with the tool response as a child of the tool span
+                            with tracer.start_as_current_span("final_llm_call", kind=trace.SpanKind.INTERNAL) as final_span:
+                                final_span.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, "LLM")
+                                final_span.set_attribute("llm.request.model", model)
+                                final_span.set_attribute("llm.request.temperature", 0.7)
+                                final_span.set_attribute("chain.step", "final_response")
+                                
+                                final_response = openai_client.chat.completions.create(
+                                    model=model,
+                                    messages=messages
+                                )
+                                result = final_response.choices[0].message.content
+                                
+                                # Set final span attributes
+                                final_span.set_attribute(SpanAttributes.OUTPUT_VALUE, result or "")
+                                final_span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "text/plain")
+                                final_span.set_attribute("span.status", "success")
+                                final_span.set_status(Status(StatusCode.OK, "Final response generated"))
+                        
+                        # Set chain completion attributes
+                        chain_span.set_attribute("chain.completed", True)
+                        chain_span.set_attribute("chain.steps", ["tool_execution", "final_llm_call"])
+                        chain_span.set_attribute(SpanAttributes.OUTPUT_VALUE, result or "")
+                        chain_span.set_status(Status(StatusCode.OK, "Tool chain completed successfully"))
+                else:
+                    tool_response = ""
+                    result = message.content
             else:
-                tool_response = ""
-
-            # Add the tool response to the conversation
-            messages = [
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": None, "tool_calls": [tool_call]},
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "name": tool_name,
-                    "content": tool_response
-                }
-            ]
-
-            # Make the final call with the tool response
-            final_response = openai_client.chat.completions.create(
-                model=model,
-                messages=messages
-            )
-            result = final_response.choices[0].message.content
-        else:
-            result = message.content
+                # Mark decision as direct response path
+                decision_span.set_attribute("decision.result", "direct_response")
+                
+                # No tool calls - direct response path
+                # Create a separate span that's a sibling to the main LLM call, not a child
+                with tracer.start_as_current_span("direct_chat_completion", kind=trace.SpanKind.INTERNAL) as direct_span:
+                    direct_span.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, "LLM")
+                    direct_span.set_attribute("chain.step", "direct_response")
+                    direct_span.set_attribute("llm.request.model", model)
+                    direct_span.set_attribute("llm.request.temperature", 0.7)
+                    
+                    result = message.content
+                    
+                    # Set direct response attributes
+                    direct_span.set_attribute(SpanAttributes.OUTPUT_VALUE, result or "")
+                    direct_span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "text/plain")
+                    direct_span.set_attribute("span.status", "success")
+                    direct_span.set_status(Status(StatusCode.OK, "Direct response generated"))
+            
+            # Set decision completion
+            decision_span.set_attribute("decision.completed", True)
+            decision_span.set_attribute(SpanAttributes.OUTPUT_VALUE, result or "")
+            decision_span.set_status(Status(StatusCode.OK, "Decision completed"))
 
         assert result is not None, "OpenAI response content was None"
         span.set_attribute(MessageAttributes.MESSAGE_ROLE, "assistant")
@@ -376,17 +437,56 @@ def call_anthropic(prompt: str, model: str = "claude-3-opus-20240229") -> str:
         span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "text/plain")
         return result
 
-# Example usage:
+def call_openai_with_session(prompt: str, session_id: str = "", user_id: str = "", model: str = "gpt-3.5-turbo") -> str:
+    """Call OpenAI with session tracking"""
+    if not session_id:
+        session_id = str(uuid.uuid4())
+    if not user_id:
+        user_id = ""
+    with using_attributes(session_id=session_id, user_id=user_id):
+        return call_openai(prompt, model)
+
+def call_anthropic_with_session(prompt: str, session_id: str = "", user_id: str = "", model: str = "claude-3-opus-20240229") -> str:
+    """Call Anthropic with session tracking"""
+    if not session_id:
+        session_id = str(uuid.uuid4())
+    if not user_id:
+        user_id = ""
+    with using_attributes(session_id=session_id, user_id=user_id):
+        return call_anthropic(prompt, model)
+
+# Example usage with sessions:
 if __name__ == "__main__":
+    # Create a session ID for this conversation
+    session_id = str(uuid.uuid4())
+    user_id = "test-user-123"
+    
+    print(f"Session ID: {session_id}")
+    print(f"User ID: {user_id}")
+    
+    # Simulate a multi-turn conversation in the same session
     test_prompt = "What's a quick dinner recipe using eggs and spinach?"
     test_tool_prompt = "What's the weather in London?"
+    follow_up_prompt = "Can you make that recipe vegetarian?"
     
-    # Try OpenAI
-    print("OpenAI Response:")
-    openai_response = call_openai(test_tool_prompt)
-    print(openai_response)
+    # Test 1: Direct response (no tool call) - Session 1
+    print("\n=== Session 1: Direct Response ===")
+    openai_response = call_openai_with_session(test_prompt, session_id, user_id)
+    print(f"Response: {openai_response}")
     
-    # Try Anthropic
-    print("\nAnthropic Response:")
-    anthropic_response = call_anthropic(test_prompt)
-    print(anthropic_response)
+    # Test 2: Tool call response - Same session
+    print("\n=== Session 1: Tool Call Response ===")
+    openai_tool_response = call_openai_with_session(test_tool_prompt, session_id, user_id)
+    print(f"Response: {openai_tool_response}")
+    
+    # Test 3: Follow-up question - Same session
+    print("\n=== Session 1: Follow-up Question ===")
+    follow_up_response = call_openai_with_session(follow_up_prompt, session_id, user_id)
+    print(f"Response: {follow_up_response}")
+    
+    # Test 4: New session with Anthropic
+    new_session_id = str(uuid.uuid4())
+    print(f"\nNew Session ID: {new_session_id}")
+    print("\n=== Session 2: Anthropic Response ===")
+    anthropic_response = call_anthropic_with_session(test_prompt, new_session_id, user_id)
+    print(f"Response: {anthropic_response}")
